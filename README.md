@@ -1,8 +1,6 @@
-# Plan
+# CSAPP 深入理解计算机系统
 
-## CSAPP 深入理解计算机系统
-
-### 资源
+## 资源
 
 1. CMU 15-213 [B站课程视频链接](https://www.bilibili.com/video/BV1iW411d7hd?spm_id_from=333.999.0.0)
 
