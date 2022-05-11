@@ -12,7 +12,7 @@
 
    - 英文版对照看 [链接](https://raw.githubusercontent.com/Sorosliu1029/CSAPP-Labs/master/Computer%20Systems%20A%20Programmers%20Perspective%20(3rd).pdf)
 
-   - homework
+   - homework [参考答案](https://dreamanddead.github.io/CSAPP-3e-Solutions/)
 
 4. 课程Lab [Lab链接](https://hansimov.gitbook.io/csapp/labs/labs-overview)
 
