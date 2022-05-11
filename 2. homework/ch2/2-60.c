@@ -3,8 +3,7 @@
 unsigned replace_byte(unsigned x, int i, unsigned char b)
 {
     unsigned char* p = (unsigned char*)&x;
-    p += i;
-    *p = b;
+    p[i] = b;
 
     return x;
 }
