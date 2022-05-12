@@ -25,12 +25,10 @@ void show_float(size_t* f)
 }
 
 int main() {
-    int x = 1 << 31;
+    int x = 0x7fffffff;
+    x = x + x + 2;
+    printf("%d\n", x);
 
-    show_bytes((pointer)&x, sizeof(x));
-    // show_float((size_t*)&f);
-    // printf("hello world");
-
-    getchar();
+    // getchar();
     return 0;
 }
