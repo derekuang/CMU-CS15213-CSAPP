@@ -162,8 +162,8 @@ int tmin(void) {
  *   Rating: 1
  */
 int isTmax(int x) {
-    x = !!(x + x + 2); // Is sth wrong of the btest programme?
-    return x;
+    int y = x + 1;
+    return !!y & !~(x^y);
 }
 //2
 /*
@@ -202,7 +202,12 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-    return 2;
+    int upperBound, lowerBound, upper, lower;
+    upperBound = (1 << 31) + (~0x30 + 1);   // 0x8000000 - 0x30
+    lowerBound = ~0x39;                     // -0x39 - 1
+    upper = x + upperBound;
+    lower = x + lowerBound;
+    return (upper >> 31) & (lower >> 31) & 1;
 }
 /*
  * conditional - same as x ? y : z
@@ -212,7 +217,9 @@ int isAsciiDigit(int x) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-    return 2;
+    x = ~!x + 1; // x = 0 -> 0xFFFFFFFF
+                 // x != 0 -> 0
+    return (x & z) | (~x & y);
 }
 /*
  * isLessOrEqual - if x <= y  then return 1, else return 0
@@ -222,7 +229,13 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-    return 2;
+    int sx, sy, diff;
+    sx = x >> 31 & 1;
+    sy = y >> 31 & 1;
+    diff = x + (~y + 1); // x - y
+    // x and y have same sign (!(x ^ y)) and diff is negative (diff >> 31 & 1) or zero (!diff)
+    // or sign x is 1 and sign y is 0 (x & !y)
+    return (!(sx ^ sy) & ((diff >> 31 & 1) | !diff)) | (sx & !sy);
 }
 //4
 /*
@@ -234,7 +247,13 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4
  */
 int logicalNeg(int x) {
-    return 2;
+    x = ~x;
+    x = x >> 16 & x;
+    x = x >> 8 & x;
+    x = x >> 4 & x;
+    x = x >> 2 & x;
+    x = x >> 1 & x;
+    return x & 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
