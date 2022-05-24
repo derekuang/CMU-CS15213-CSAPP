@@ -268,7 +268,27 @@ int logicalNeg(int x) {
  *  Rating: 4
  */
 int howManyBits(int x) {
-    return 0;
+    int s, b16, b8, b4, b2, b1, b0;
+
+    // if x is non-negative, keep x,
+    // else x = ~x
+    s = x >> 31;
+    x ^= s;
+
+    // bx represent if there is 1 in the high x bit
+    b16 = !!(x >> 16) << 4;
+    x >>= b16;
+    b8 = !!(x >> 8) << 3;
+    x >>= b8;
+    b4 = !!(x >> 4) << 2;
+    x >>= b4;
+    b2 = !!(x >> 2) << 1;
+    x >>= b2;
+    b1 = !!(x >> 1);
+    x >>= b1;
+    b0 = x;
+
+    return b16 + b8 + b4 + b2 + b1 + b0 + 1;
 }
 //float
 /*
@@ -283,7 +303,28 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-    return 2;
+    unsigned s, e, m, em;
+
+    s = uf & 0x80000000;
+    e = uf & 0x7f800000;
+    m = uf & 0x007fffff;
+    em = uf & 0x7fffffff;
+
+    // NaN or infinity
+    if (e == 0x7f800000)
+        return uf;
+
+    // 0, close to 0
+    if (e == 0) {
+        em <<= 1;
+    }
+    // Normalized value
+    else {
+        e += 0x00800000;
+        em = e | m;
+    }
+
+    return s | em;
 }
 /*
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
