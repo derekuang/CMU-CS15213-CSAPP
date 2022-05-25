@@ -339,7 +339,34 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-    return 2;
+    unsigned s, e, m, E;
+
+    s = uf & 0x80000000;
+    e = uf & 0x7f800000;
+    m = uf & 0x007fffff;
+
+    // less than 1 (E < 0 or e == 0)
+    if (e < 0x3f800000)
+        return 0;
+
+    // out of range (E > 30), INT_MIN, NaN or infinity
+    if (e > 0x4e800000)
+        return 0x80000000u;
+
+    m |= 0x00800000;
+    E = e >> 23;
+    if (E >= 150)
+        m <<= (E - 150);
+    else
+        m >>= (150 - E);
+    // positive
+    if (!s) {
+        return m;
+    }
+    // negative
+    else {
+        return ~m + 1;
+    }
 }
 /*
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -355,5 +382,20 @@ int floatFloat2Int(unsigned uf) {
  *   Rating: 4
  */
 unsigned floatPower2(int x) {
-    return 2;
+    // too small
+    if (x < -149)
+        return 0;
+
+    // close to 0
+    if (x >= -149 && x < -126) {
+        x += 149;
+        return 1 << x;
+    }
+
+    // Normalized value
+    if (x >= -126 && x <= 127)
+        return (x + 127) << 23;
+
+    // too large (x > 127)
+    return 0x7f800000;
 }
