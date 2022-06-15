@@ -1,4 +1,4 @@
-# 信息的表示和处理
+# 2 Representing and Manipulating Information
 
 
 
