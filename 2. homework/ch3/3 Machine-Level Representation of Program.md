@@ -93,7 +93,13 @@
 
 - Solution
 
+  ```c
+  long cread_alt(long *xp) {
+      return (!xp ? 0 : *xp);
+  }
+  ```
 
+  
 
 ## 3.64
 
@@ -139,6 +145,10 @@
   > based on the assembly code.
 
 - Solution
+
+  > A. &A\[i]\[j][k] = x~A~ + L * (S * T * i + T * j + k)
+  >
+  > B. R = 14; S = 5; T = 13
 
 
 
