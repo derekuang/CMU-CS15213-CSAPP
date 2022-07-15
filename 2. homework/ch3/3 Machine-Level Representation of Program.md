@@ -194,6 +194,8 @@
 
 - Solution
 
+  > A = 9; B = 5
+
 
 
 ## 3.69
@@ -243,3 +245,15 @@
   > in this structure are idx and x, and that both of these contain signed values.
 
 - Solution
+
+  > A. CNT = 7
+
+  ```c
+  // B
+  typedef struct {
+      long idx;
+      long x[4];
+  } a_struct;
+  ```
+
+  
