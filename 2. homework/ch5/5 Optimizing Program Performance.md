@@ -52,6 +52,15 @@
   
 - Solution
 
+  > A.
+
+  ![](inner4-a.png) ![](inner4-b.png)
+
+  > B. The double add operation, CPE = 3.0
+
+  > C. The integer add operation, CPE = 1.0
+
+  > D. Because the critical path only have the add operation, mul operation is not belong to critical path.
 
 
 
@@ -66,3 +75,33 @@
   > B. Explain why the performance for floating-point data did not improve with loop unrolling.
 
 - Solution
+
+  ```c
+  void inner4_unrolling6x1(vec_ptr u, vec_ptr v, data_t *dest)
+  {
+      long i;
+      long length = vec_length(u);
+      long limit = length - 6;
+      data_t *udata = get_vec_start(u);
+      data_t *vdata = get_vec_start(v);
+      data_t sum = (data_t) 0;
+      
+      for (i = 0; i < limit; i += 6) {
+          sum = sum + udata[i] * vdata[i];
+          sum = sum + udata[i+1] * vdata[i+1];
+          sum = sum + udata[i+2] * vdata[i+2];
+          sum = sum + udata[i+3] * vdata[i+3];
+          sum = sum + udata[i+4] * vdata[i+4];
+          sum = sum + udata[i+5] * vdata[i+5];
+      }
+      
+      for (; i < length; i++) {
+          sum = sum + udata[i] * vdata[i];
+      }
+      *dest = sum;
+  }
+  ```
+
+  > A. Because each loop have 6 add operation, so each element still have 1 add operation, so CPE can't be less than 1.0
+
+  > B. The reason is same as A.
