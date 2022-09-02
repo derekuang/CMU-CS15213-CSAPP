@@ -3,6 +3,6 @@
 *.exe
 .vscode
 tempCodeRunnerFile.c
-test.c
-test.s
-test.c
+test.*
+csim
+.csim_results
