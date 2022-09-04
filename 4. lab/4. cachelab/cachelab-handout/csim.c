@@ -93,15 +93,14 @@ int main(int argc, char** argv) {
                 break;
             case 'M': // modify data(load followed by store)
                 updateSet(pset, tag, E, res);
-                hit_count++;
-                strcat(res, " hit");
+                updateSet(pset, tag, E, res);
                 break;
             default:
                 break;
         }
 
         if (v) {
-            printf("%c %lx,%d%s\n", op, addr, size, res);
+            printf("%c %lx,%d\tsindex: %d\tresult:%s\n", op, addr, size, iset, res);
         }
     }
 
