@@ -1,5 +1,5 @@
 /**
- * @author kuangyaode
+ * @author kuangyaode <kuangyaode@gmail.com>
  */
 
 #include <getopt.h>
@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     char *t;
 
     // loop over arguments
-    while (-1 != (opt = getopt(argc, argv, "hv::s:E:b:t:"))) {
+    while (-1 != (opt = getopt(argc, argv, "s:E:b:t:hv"))) {
         switch (opt) {
             case 'h':
                 printHelp();
@@ -51,11 +51,10 @@ int main(int argc, char** argv) {
                 t = optarg;
                 break;
             default:
-                printf("wrong argument\n");
+                printf("wrong argument %c\n", opt);
                 break;
         }
     }
-    // printf("v:%d\ts:%d\tE:%d\tb:%d\tt:\"%s\"\n", v, s, E, b, t);
 
     // Initialize the cache
     int i, setNum = pow(2, s);
@@ -79,7 +78,6 @@ int main(int argc, char** argv) {
         addr = strtoll(strtok(&line[3], ","), NULL, 16);
         size = atoi(strtok(NULL, ","));
         res[0] = '\0';
-        // printf("op: %c\taddr: %d\tsize: %d\n", op, addr, size);
 
         tag = addr >> (b + s);
         iset = (addr >> b) & ((1 << s) - 1);
@@ -100,7 +98,8 @@ int main(int argc, char** argv) {
         }
 
         if (v) {
-            printf("%c %lx,%d\tsindex: %d\tresult:%s\n", op, addr, size, iset, res);
+            printf("%c %lx,%d\tsindex: %d\tresult:%s\n",
+                    op, addr, size, iset, res);
         }
     }
 
