@@ -71,21 +71,21 @@
 
   **A.**
 
-  > (a) REF(main.1) -> DEF()
+  > (a) REF(main.1) -> DEF(main.1)
   >
-  > (b) REF(main.2) -> DEF()
+  > (b) REF(main.2) -> DEF(main.2)
 
   **B.**
 
-  > (a) REF(x.1) -> DEF()
+  > (a) REF(x.1) -> UNKNOWN
   >
-  > (b) REF(x.2) -> DEF()
+  > (b) REF(x.2) -> UNKNOWN
 
   **C.**
 
-  > (a) REF(x.1) -> DEF()
+  > (a) REF(x.1) -> ERROR
   >
-  > (b) REF(x.2) -> DEF()
+  > (b) REF(x.2) -> ERROE
 
 
 
@@ -120,7 +120,7 @@
 
 - Solution
 
-  
+  By rule2, main in foo6 is a strong symbol, and main in bar6 is a weak symbol, so the main in bar6.c reference the symbol in foo6, therefore p2 print the address of the main function.
 
 
 
@@ -146,7 +146,19 @@
 
 - Solution
 
+  A. ADDR(S) = ADDR(.text) = 0x4004e0
   
+  ​	 refaddr = ADDR(S) + r.offset = 0x4004ea
+  
+  ​	 *refptr = ADDR(r.symbol) - refaddr + r.addend = 0x4004f8 - 0x4004ea - 4 = 0xa
+  
+  B. ADDR(S) = ADDR(.text) = 0x4004d0
+  
+  ​	 refaddr = ADDR(S) + r.offset = 0x4004da
+  
+  ​	 *refptr = ADDR(r.symbol) - refaddr + r.addend = 0x400500 - 0x4004da - 4 = 0x22
+
+
 
 ## 7.13
 
@@ -159,3 +171,25 @@
   > C. What shared libraries does the gcc driver on your system use?
 
 - Solution
+
+  A.
+
+  > $ ar -t /usr/lib32/libc.a | wc -l
+  >
+  > 1982
+  >
+  > $ ar -t /usr/lib32/libm.a | wc -l
+  >
+  > 748
+
+  B. Same.
+
+  C.
+
+  > $ ldd /bin/ls | sed 's/^ */    /'
+  >
+  > ​	linux-vdso.so.1 (0x00007fff16dad000)
+  > ​	libselinux.so.1 => /lib/x86_64-linux-gnu/libselinux.so.1 (0x00007f9f8ccbb000)
+  > ​	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f9f8ca93000)
+  > ​	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007f9f8c9fc000)
+  > ​	/lib64/ld-linux-x86-64.so.2 (0x00007f9f8cd1c000)
