@@ -51,7 +51,7 @@
 
 - Solution
 
-  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.11.png)
+  ![](8.11.png)
 
   The answer is 4.
 
@@ -84,7 +84,7 @@
 
 - Solution
 
-  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.12.png)
+  ![](8.12.png)
 
   The answer is 10.
 
@@ -116,7 +116,7 @@
 
 - Solution
 
-  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.16.png)
+  ![](8.16.png)
 
   The answer is "counter = 3".
 
@@ -160,7 +160,7 @@
 
 - Solution
 
-  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.18.png)
+  ![](8.18.png)
 
   The answer is ACE.
 
