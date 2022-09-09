@@ -190,6 +190,10 @@
 
 - Solution
 
+  ![](D:\course\derekuang-csapp\2. homework\ch8\8.21.png)
+  
+  "pqr" or "prq".
+  
   
 
 ## 8.25
