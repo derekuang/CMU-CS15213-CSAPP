@@ -21,12 +21,12 @@
 
   | Process pair | Concurrent? |
   | :----------: | :---------: |
-  |      AB      |             |
-  |      AC      |             |
-  |      AD      |             |
-  |      BC      |             |
-  |      BD      |             |
-  |      CD      |             |
+  |      AB      |      N      |
+  |      AC      |      Y      |
+  |      AD      |      Y      |
+  |      BC      |      Y      |
+  |      BD      |      Y      |
+  |      CD      |      Y      |
 
   
 
@@ -50,6 +50,10 @@
   ```
 
 - Solution
+
+  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.11.png)
+
+  The answer is 4.
 
   
 
@@ -80,6 +84,10 @@
 
 - Solution
 
+  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.12.png)
+
+  The answer is 10.
+
   
 
 ## 8.16
@@ -108,7 +116,11 @@
 
 - Solution
 
-  
+  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.16.png)
+
+  The answer is "counter = 3".
+
+
 
 ## 8.18
 
@@ -147,6 +159,10 @@
   > E. 100212
 
 - Solution
+
+  ![](G:\repositories\derekuang-csapp\2. homework\ch8\8.18.png)
+
+  The answer is ACE.
 
   
 
