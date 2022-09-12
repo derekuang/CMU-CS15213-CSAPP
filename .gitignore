@@ -3,7 +3,6 @@
 *.exe
 .vscode
 tempCodeRunnerFile.c
-test.*
 csim
 .csim_results
 4. lab/4. cachelab/cachelab-handout/.marker
@@ -13,3 +12,4 @@ csim
 4. lab/4. cachelab/cachelab-handout/trace.tmp
 4. lab/4. cachelab/cachelab-handout/tracegen
 4. lab/4. cachelab/cachelab-handout/trans.o
+test
