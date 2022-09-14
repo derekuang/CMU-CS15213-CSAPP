@@ -26,6 +26,8 @@
 
 - Solution
 
+  The answer is 4.
+
 
 
 ## 10.9
@@ -47,7 +49,14 @@
 
 - Solution
 
+  ```c
+  if (Fork() == 0) { /* child */
+  	dup2(STDIN_FILENO, atoi(argv[1])); // dup2(0, 3);
+  	Execve("fstatcheck", argv, envp);
+  }
+  ```
 
+  
 
 ## 10.10
 
@@ -56,3 +65,29 @@
   > Modify the cpfile program in Figure 10.5 so that it takes an optional command-line argument infile. If infile is given, then copy infile to standard output; otherwise, copy standard input to standard output as before. The twist is that your solution must use the original copy loop (lines 9–11) for both cases. You are only allowed to insert code, and you are not allowed to change any of the existing code.
 
 - Solution
+
+  ```c
+  #include "csapp.h"
+  
+  int main(int argc, char **argv)
+  {
+      int n;
+      rio_t rio;
+      char buf[MAXLINE];
+      
+      char *infile;
+      int fd;
+      if (argc > 1) {
+          infile = argv[1];
+          if ((fd = Open(infile, O_RDONLY, 0777)) > 0) {
+              Dup2(fd, STDIN_FILENO);
+          }
+      }
+      
+      Rio_readinitb(&rio, STDIN_FILENO);
+      while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0)
+          Rio_writen(STDOUT_FILENO, buf, n);
+  }
+  ```
+
+  
