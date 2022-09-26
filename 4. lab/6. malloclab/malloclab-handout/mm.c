@@ -12,6 +12,8 @@
  * v1.1: Compatible with next-fit placement.
  *
  * v1.2: Remove footer from allocated block to improve space utilization.
+ *
+ * v1.3: Compatible with best-fit placement.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +45,14 @@ team_t team = {
  * If NEXT_FIT defined, use next fit search, else use first-fit search
  */
 #define NEXT_FIT
+
+/*
+ * If NEXT_FIT not defined and BEST_FIT defined, use best fit search,
+ * if BEST_FIT not defined either, use first-fit search
+ */
+#ifndef NEXT_FIT
+#define BEST_FIT
+#endif
 
 /* $begin mallocmacros */
 /* Basic constants and macros */
@@ -294,6 +304,20 @@ static void *find_fit(size_t asize)
             return rover;
         }
     }
+
+#elif defined(BEST_FIT)
+    /* Best fit search */
+    void *bp1, *bp2 = NULL;
+    size_t size;
+
+    for (bp1 = heap_listp; GET_SIZE(HDRP(bp1)) > 0; bp1 = NEXT_BLKP(bp1)) {
+        if (!GET_ALLOC(HDRP(bp1)) && (GET_SIZE(HDRP(bp1)) >= asize) &&
+           (!bp2 || (GET_SIZE(HDRP(bp1)) < GET_SIZE(HDRP(bp2))))) {
+            bp2 = bp1;
+        }
+    }
+    return bp2;
+
 #else
     /* First fit search */
     void *bp;
@@ -304,6 +328,7 @@ static void *find_fit(size_t asize)
         }
     }
 #endif
+
     return NULL; /* No fit */
 }
 
