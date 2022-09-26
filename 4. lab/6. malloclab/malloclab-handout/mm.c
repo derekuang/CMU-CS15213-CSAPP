@@ -10,6 +10,8 @@
  *       first-fit placement, and boundary tag coalescing.
  *
  * v1.1: Compatible with next-fit placement.
+ *
+ * v1.2: Remove footer from allocated block to improve space utilization.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,11 +52,13 @@ team_t team = {
 #define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (4KB) */
 #define MINBLOCK    2*DSIZE /* Minimum size of a block */
 
+/* Block alloc state */
+#define BLK_FREE    0b00    /* The block is free */
+#define BLK_ALLOC   0b01    /* The block is allocated */
+#define BLK_PALLOC  0b10    /* The previous block is allocated(only stored in header) */
+
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
-
-/* header size of a block, indicate the size of payload */
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -67,16 +71,17 @@ team_t team = {
 #define PUT(p, val)  (*(unsigned int *)(p) = (val))
 
 /* Read the size and allocated fields from address p */
-#define GET_SIZE(p)       (GET(p) & ~0x7)
-#define GET_ALLOC(p)      (GET(p) & 0x1)
+#define GET_SIZE(p)   (GET(p) & ~0b111)
+#define GET_ALLOC(p)  (GET(p) & BLK_ALLOC)
+#define GET_PALLOC(p) (GET(p) & BLK_PALLOC)
 
 /* Given block ptr bp, compute address of its header and footer */
 #define HDRP(bp)       ((char *)(bp) - WSIZE)
-#define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+#define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE) /* Only works for the block is free */
 
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
-#define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+#define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) /* Only works for the previous block is free */
 /* $end mallocmacros */
 
 /* Global variables */
@@ -90,9 +95,6 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
-// static void printblock(void *bp);
-// static void checkheap(int verbose);
-// static void checkblock(void *bp);
 
 /*
  * mm_init - Initialize the memory manager.
@@ -102,11 +104,11 @@ int mm_init(void)
     /* Create the initial empty heap */
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
-    PUT(heap_listp, 0);                          /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); /* Prologue header */
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));     /* Epilogue header */
-    heap_listp += (2*WSIZE);                     /* Payload(0) of the prologue header */
+    PUT(heap_listp, 0);                                             /* Alignment padding */
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, BLK_ALLOC));            /* Prologue header */
+    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, BLK_ALLOC));            /* Prologue footer(unnecessary) */
+    PUT(heap_listp + (3*WSIZE), PACK(0, (BLK_ALLOC | BLK_PALLOC))); /* Epilogue header */
+    heap_listp += (2*WSIZE);                                        /* Payload(0) start of prologue */
 
 #ifdef NEXT_FIT
     rover = heap_listp;
@@ -135,11 +137,11 @@ void *mm_malloc(size_t size)
         return NULL;
 
     /* Adjust block size to include overhead and alignment reqs */
-    if (size <= DSIZE) {
+    if (size <= 3*WSIZE) {
         asize = MINBLOCK;
     }
     else {
-        asize = ALIGN(size+DSIZE);
+        asize = ALIGN(size+WSIZE);
     }
 
     /* Search the free list for a fit */
@@ -169,9 +171,21 @@ void mm_free(void *bp)
         mm_init();
     }
 
-    size_t size = GET_SIZE(HDRP(bp));
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
+    size_t size, palloc, nsize, nalloc;
+    char *np;
+
+    /* Update alloc state of the block */
+    size = GET_SIZE(HDRP(bp));
+    palloc = GET_PALLOC(HDRP(bp));
+    PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
+    PUT(FTRP(bp), PACK(size, BLK_FREE));
+
+    /* Update alloc state of the next block */
+    np = NEXT_BLKP(bp);
+    nsize = GET_SIZE(HDRP(np));
+    nalloc = GET_ALLOC(HDRP(np));
+    PUT(HDRP(np), PACK(nsize, nalloc));
+
     coalesce(bp);
 }
 
@@ -220,6 +234,7 @@ static void *extend_heap(size_t bytes)
 {
     char *bp;
     size_t size;
+    size_t palloc;
 
     /* Allocate an multiple of ALIGNMENT number bytes to maintain alignment */
     size = ALIGN(bytes);
@@ -227,9 +242,10 @@ static void *extend_heap(size_t bytes)
         return NULL;
 
     /* Initialize free block header/footer and the epilogue header */
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+    palloc = GET_PALLOC(HDRP(bp));
+    PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
+    PUT(FTRP(bp), PACK(size, BLK_FREE));
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, BLK_ALLOC));
 
     /* Coalesce if the previous block was free */
     return coalesce(bp);
@@ -244,15 +260,15 @@ static void place(void *bp, size_t asize)
     size_t csize = GET_SIZE(HDRP(bp));
 
     if ((csize - asize) >= MINBLOCK) {
-        PUT(HDRP(bp), PACK(asize, 1));
-        PUT(FTRP(bp), PACK(asize, 1));
+        PUT(HDRP(bp), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK((csize-asize), 0));
-        PUT(FTRP(bp), PACK((csize-asize), 0));
+        PUT(HDRP(bp), PACK((csize-asize), (BLK_FREE | BLK_PALLOC)));
+        PUT(FTRP(bp), PACK((csize-asize), BLK_FREE));
     }
     else {
-        PUT(HDRP(bp), PACK(csize, 1));
-        PUT(FTRP(bp), PACK(csize, 1));
+        PUT(HDRP(bp), PACK(csize, (BLK_ALLOC | BLK_PALLOC)));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)), (BLK_ALLOC | BLK_PALLOC)));
     }
 }
 
@@ -296,27 +312,27 @@ static void *find_fit(size_t asize)
  */
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t palloc = GET_PALLOC(HDRP(bp));
+    size_t nalloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
 
     /* Case 1 */
-    if (prev_alloc && next_alloc) {
+    if (palloc && nalloc) {
         return bp;
     }
 
     /* Case 2 */
-    else if (prev_alloc && !next_alloc) {
+    else if (palloc && !nalloc) {
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
+        PUT(FTRP(bp), PACK(size, BLK_FREE));
     }
 
     /* Case 3 */
-    else if (!prev_alloc && next_alloc) {
+    else if (!palloc && nalloc) {
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
+        PUT(FTRP(bp), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
     }
 
@@ -324,8 +340,8 @@ static void *coalesce(void *bp)
     else {
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
     }
 
