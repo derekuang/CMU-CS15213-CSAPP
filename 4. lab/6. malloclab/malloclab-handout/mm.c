@@ -6,8 +6,10 @@
  * footers.  Blocks are never coalesced or reused. Realloc is
  * implemented directly using mm_malloc and mm_free.
  *
- * v1: In this approach, the allocator based on implicit free lists,
- *     first-fit placement, and boundary tag coalescing.
+ * v1.0: In this approach, the allocator based on implicit free lists,
+ *       first-fit placement, and boundary tag coalescing.
+ *
+ * v1.1: Compatible with next-fit placement.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +37,11 @@ team_t team = {
     ""
 };
 
+/*
+ * If NEXT_FIT defined, use next fit search, else use first-fit search
+ */
+#define NEXT_FIT
+
 /* $begin mallocmacros */
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
@@ -60,8 +67,8 @@ team_t team = {
 #define PUT(p, val)  (*(unsigned int *)(p) = (val))
 
 /* Read the size and allocated fields from address p */
-#define GET_SIZE(p)  (GET(p) & ~0x7)
-#define GET_ALLOC(p) (GET(p) & 0x1)
+#define GET_SIZE(p)       (GET(p) & ~0x7)
+#define GET_ALLOC(p)      (GET(p) & 0x1)
 
 /* Given block ptr bp, compute address of its header and footer */
 #define HDRP(bp)       ((char *)(bp) - WSIZE)
@@ -74,6 +81,9 @@ team_t team = {
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */
+#ifdef NEXT_FIT
+static char *rover;           /* Next fit rover */
+#endif
 
 /* Function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
@@ -97,6 +107,10 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));     /* Epilogue header */
     heap_listp += (2*WSIZE);                     /* Payload(0) of the prologue header */
+
+#ifdef NEXT_FIT
+    rover = heap_listp;
+#endif
 
     /* Extend the empty heap with a free block of CHUNKSIZE */
     if (extend_heap(CHUNKSIZE) == NULL)
@@ -247,7 +261,25 @@ static void place(void *bp, size_t asize)
  */
 static void *find_fit(size_t asize)
 {
-    /* First-fit search */
+#ifdef NEXT_FIT
+    /* Next fit search */
+    void *oldrover = rover;
+
+    /* Search from the rover to the end of list */
+    for( ; GET_SIZE(HDRP(rover)) > 0; rover = NEXT_BLKP(rover)) {
+        if (!GET_ALLOC(HDRP(rover)) && (GET_SIZE(HDRP(rover)) >= asize)) {
+            return rover;
+        }
+    }
+
+    /* Search from start of list to old rover */
+    for (rover = heap_listp; rover < oldrover; rover = NEXT_BLKP(rover)) {
+        if (!GET_ALLOC(HDRP(rover)) && (GET_SIZE(HDRP(rover)) >= asize)) {
+            return rover;
+        }
+    }
+#else
+    /* First fit search */
     void *bp;
 
     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
@@ -255,6 +287,7 @@ static void *find_fit(size_t asize)
             return bp;
         }
     }
+#endif
     return NULL; /* No fit */
 }
 
@@ -295,6 +328,14 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+
+#ifdef NEXT_FIT
+    /* Make sure the rove isn't pointing into the free block */
+    /* that we just coalesced */
+    if ((rover > (char *)bp) && (rover < NEXT_BLKP(bp))) {
+        rover = bp;
+    }
+#endif
 
     return bp;
 }
