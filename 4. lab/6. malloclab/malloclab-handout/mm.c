@@ -18,6 +18,8 @@
  * v2.0: In this approach, the allocator based on explicit free lists,
  *       first-fit placement, freeing with LIFO(last-in-first-out) policy,
  *       and boundary tag coalescing.
+ *
+ * v2.1: Compatible with next-fit placement and best-fit placement.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,12 +47,18 @@ team_t team = {
     ""
 };
 
+/* $begin mallocmacros */
+
+/*
+ * Choose the allocator is based on which type of free list,
+ * which type to find free block and which insertion policy
+ * used by explicit free list.
+ */
 /*
  * If EXPT_LIST defined, the allocator based on explicit free lists,
  * else on implicit free lists.
  */
 #define EXPT_LIST
-
 /*
  * If NEXT_FIT defined, use next fit search, else use first-fit search.
  * If NEXT_FIT not defined and BEST_FIT defined, use best fit search.
@@ -58,7 +66,6 @@ team_t team = {
 #define NEXT_FITx
 #define BEST_FITx
 
-/* $begin mallocmacros */
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
@@ -294,6 +301,10 @@ static void place(void *bp, size_t asize)
         PUT(SUCC_BLKPP(bp), SUCC_BLKP(old_bp));
         if (SUCC_BLKP(old_bp)) PUT(PRED_BLKPP(SUCC_BLKP(old_bp)), bp);
         if (old_bp == heap_listp) heap_listp = bp;
+
+        #ifdef NEXT_FIT
+            rover = bp;
+        #endif
     #endif
     }
     else {
@@ -305,6 +316,10 @@ static void place(void *bp, size_t asize)
         if (PRED_BLKP(old_bp)) PUT(SUCC_BLKPP(PRED_BLKP(old_bp)), SUCC_BLKP(old_bp));
         if (SUCC_BLKP(old_bp)) PUT(PRED_BLKPP(SUCC_BLKP(old_bp)), PRED_BLKP(old_bp));
         if (old_bp == heap_listp) heap_listp = SUCC_BLKP(old_bp);
+
+        #ifdef NEXT_FIT
+            rover = SUCC_BLKP(rover);
+        #endif
     #endif
     }
 }
@@ -318,6 +333,21 @@ static void *find_fit(size_t asize)
     /* Next fit search */
     void *oldrover = rover;
 
+#ifdef EXPT_LIST
+    /* Search from the rover to the end of list */
+    for ( ; rover != NULL; rover = SUCC_BLKP(rover)) {
+        if (GET_SIZE(HDRP(rover)) >= asize) {
+            return rover;
+        }
+    }
+
+    /* Search from start of list to old rover */
+    for (rover = heap_listp; rover != oldrover; rover = SUCC_BLKP(rover)) {
+        if (GET_SIZE(HDRP(rover)) >= asize) {
+            return rover;
+        }
+    }
+#else
     /* Search from the rover to the end of list */
     for( ; GET_SIZE(HDRP(rover)) > 0; rover = NEXT_BLKP(rover)) {
         if (!GET_ALLOC(HDRP(rover)) && (GET_SIZE(HDRP(rover)) >= asize)) {
@@ -331,18 +361,26 @@ static void *find_fit(size_t asize)
             return rover;
         }
     }
+#endif
 
 #elif defined(BEST_FIT)
     /* Best fit search */
     void *bp1, *bp2 = NULL;
-    size_t size;
 
+#ifdef EXPT_LIST
+    for (bp1 = heap_listp; bp1 != NULL; bp1 = SUCC_BLKP(bp1)) {
+        if (GET_SIZE(HDRP(bp1)) >= asize && (!bp2 || (GET_SIZE(HDRP(bp1)) < GET_SIZE(HDRP(bp2))))) {
+            bp2 = bp1;
+        }
+    }
+#else
     for (bp1 = heap_listp; GET_SIZE(HDRP(bp1)) > 0; bp1 = NEXT_BLKP(bp1)) {
         if (!GET_ALLOC(HDRP(bp1)) && (GET_SIZE(HDRP(bp1)) >= asize) &&
            (!bp2 || (GET_SIZE(HDRP(bp1)) < GET_SIZE(HDRP(bp2))))) {
             bp2 = bp1;
         }
     }
+#endif
     return bp2;
 
 #else
