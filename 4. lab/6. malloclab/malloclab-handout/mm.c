@@ -14,6 +14,10 @@
  * v1.2: Remove footer from allocated block to improve space utilization.
  *
  * v1.3: Compatible with best-fit placement.
+ *
+ * v2.0: In this approach, the allocator based on explicit free lists,
+ *       first-fit placement, freeing with LIFO(last-in-first-out) policy,
+ *       and boundary tag coalescing.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,17 +46,17 @@ team_t team = {
 };
 
 /*
- * If NEXT_FIT defined, use next fit search, else use first-fit search
+ * If EXPT_LIST defined, the allocator based on explicit free lists,
+ * else on implicit free lists.
  */
-#define NEXT_FIT
+#define EXPT_LIST
 
 /*
- * If NEXT_FIT not defined and BEST_FIT defined, use best fit search,
- * if BEST_FIT not defined either, use first-fit search
+ * If NEXT_FIT defined, use next fit search, else use first-fit search.
+ * If NEXT_FIT not defined and BEST_FIT defined, use best fit search.
  */
-#ifndef NEXT_FIT
-#define BEST_FIT
-#endif
+#define NEXT_FITx
+#define BEST_FITx
 
 /* $begin mallocmacros */
 /* Basic constants and macros */
@@ -60,7 +64,7 @@ team_t team = {
 #define DSIZE       8       /* Double word size (bytes) */
 #define ALIGNMENT   DSIZE   /* Single word (4) or double word (8) alignment */
 #define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (4KB) */
-#define MINBLOCK    2*DSIZE /* Minimum size of a block */
+#define MINBLOCK    2*DSIZE /* Minimum size of a block(except for prologue and epilogue) */
 
 /* Block alloc state */
 #define BLK_FREE    0b00    /* The block is free */
@@ -78,7 +82,7 @@ team_t team = {
 
 /* Read and write a word at address p */
 #define GET(p)       (*(unsigned int *)(p))
-#define PUT(p, val)  (*(unsigned int *)(p) = (val))
+#define PUT(p, val)  (*(unsigned int *)(p) = (unsigned int)(val))
 
 /* Read the size and allocated fields from address p */
 #define GET_SIZE(p)   (GET(p) & ~0b111)
@@ -89,9 +93,17 @@ team_t team = {
 #define HDRP(bp)       ((char *)(bp) - WSIZE)
 #define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE) /* Only works for the block is free */
 
-/* Given block ptr bp, compute address of next and previous blocks */
-#define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
+/* Given block ptr bp, compute address of previous and next blocks */
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) /* Only works for the previous block is free */
+#define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
+
+/* Given free block ptr bp, compute address of pointer of its predecessor and successor */
+#define PRED_BLKPP(bp) ((char **)(bp))
+#define SUCC_BLKPP(bp) ((char **)((char *)(bp) + WSIZE))
+
+/* Given free block ptr bp, compute address of its predecessor and successor */
+#define PRED_BLKP(bp)  (*PRED_BLKPP(bp))
+#define SUCC_BLKP(bp)  (*SUCC_BLKPP(bp))
 /* $end mallocmacros */
 
 /* Global variables */
@@ -120,13 +132,18 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0, (BLK_ALLOC | BLK_PALLOC))); /* Epilogue header */
     heap_listp += (2*WSIZE);                                        /* Payload(0) start of prologue */
 
-#ifdef NEXT_FIT
-    rover = heap_listp;
+#ifdef EXPT_LIST
+    heap_listp = NULL; /* Initial free list is empty */
 #endif
 
     /* Extend the empty heap with a free block of CHUNKSIZE */
     if (extend_heap(CHUNKSIZE) == NULL)
         return -1;
+
+#ifdef NEXT_FIT
+    rover = heap_listp;
+#endif
+
     return 0;
 }
 
@@ -138,9 +155,6 @@ void *mm_malloc(size_t size)
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     char *bp;
-
-    if (!heap_listp)
-        mm_init();
 
     /* Ignore spurious requests */
     if (size == 0)
@@ -175,10 +189,6 @@ void mm_free(void *bp)
 {
     if (!bp) {
         return;
-    }
-
-    if (!heap_listp) {
-        mm_init();
     }
 
     size_t size, palloc, nsize, nalloc;
@@ -264,21 +274,38 @@ static void *extend_heap(size_t bytes)
 /*
  * place - Place block of asize bytes at start of free block bp
  *         and split if remainder would be at least MINBLOCK.
+ * Note: If based on explicit free lists, the predecessor and
+ *       successor of old block might be NULL.
  */
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
+    char *old_bp = bp;
 
     if ((csize - asize) >= MINBLOCK) {
         PUT(HDRP(bp), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK((csize-asize), (BLK_FREE | BLK_PALLOC)));
         PUT(FTRP(bp), PACK((csize-asize), BLK_FREE));
+
+    #ifdef EXPT_LIST
+        if (PRED_BLKP(old_bp)) PUT(SUCC_BLKPP(PRED_BLKP(old_bp)), bp);
+        PUT(PRED_BLKPP(bp), PRED_BLKP(old_bp));
+        PUT(SUCC_BLKPP(bp), SUCC_BLKP(old_bp));
+        if (SUCC_BLKP(old_bp)) PUT(PRED_BLKPP(SUCC_BLKP(old_bp)), bp);
+        if (old_bp == heap_listp) heap_listp = bp;
+    #endif
     }
     else {
         PUT(HDRP(bp), PACK(csize, (BLK_ALLOC | BLK_PALLOC)));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)), (BLK_ALLOC | BLK_PALLOC)));
+
+    #ifdef EXPT_LIST
+        if (PRED_BLKP(old_bp)) PUT(SUCC_BLKPP(PRED_BLKP(old_bp)), SUCC_BLKP(old_bp));
+        if (SUCC_BLKP(old_bp)) PUT(PRED_BLKPP(SUCC_BLKP(old_bp)), PRED_BLKP(old_bp));
+        if (old_bp == heap_listp) heap_listp = SUCC_BLKP(old_bp);
+    #endif
     }
 }
 
@@ -322,11 +349,20 @@ static void *find_fit(size_t asize)
     /* First fit search */
     void *bp;
 
+#ifdef EXPT_LIST
+    for (bp = heap_listp; bp != NULL; bp = SUCC_BLKP(bp)) {
+        if (GET_SIZE(HDRP(bp)) >= asize) {
+            return bp;
+        }
+    }
+#else
     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
         if (!GET_ALLOC(HDRP(bp)) && (GET_SIZE(HDRP(bp)) >= asize)) {
             return bp;
         }
     }
+#endif
+
 #endif
 
     return NULL; /* No fit */
@@ -340,17 +376,40 @@ static void *coalesce(void *bp)
     size_t palloc = GET_PALLOC(HDRP(bp));
     size_t nalloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
+    char *bq;
 
     /* Case 1 */
     if (palloc && nalloc) {
-        return bp;
+    #ifdef EXPT_LIST
+        PUT(PRED_BLKPP(bp), NULL);
+        PUT(SUCC_BLKPP(bp), heap_listp);
+        if (heap_listp) PUT(PRED_BLKPP(heap_listp), bp);
+        heap_listp = bp;
+    #endif
     }
 
     /* Case 2 */
     else if (palloc && !nalloc) {
-        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        bq = NEXT_BLKP(bp);
+        size += GET_SIZE(HDRP(bq));
         PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
         PUT(FTRP(bp), PACK(size, BLK_FREE));
+    #ifdef EXPT_LIST
+        if (bq == heap_listp) { /* The first free block is coalesced */
+            if (SUCC_BLKP(heap_listp)) PUT(PRED_BLKPP(SUCC_BLKP(heap_listp)), bp);
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), SUCC_BLKP(heap_listp));
+            heap_listp = bp;
+        }
+        else {
+            if (PRED_BLKP(bq)) PUT(SUCC_BLKPP(PRED_BLKP(bq)), SUCC_BLKP(bq));
+            if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), PRED_BLKP(bq));
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), heap_listp);
+            PUT(PRED_BLKPP(heap_listp), bp);
+            heap_listp = bp;
+        }
+    #endif
     }
 
     /* Case 3 */
@@ -359,15 +418,53 @@ static void *coalesce(void *bp)
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
         PUT(FTRP(bp), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
+    #ifdef EXPT_LIST
+        if (bp == heap_listp) { /* The first free block is coalesced */
+            ;
+        }
+        else {
+            if (PRED_BLKP(bp)) PUT(SUCC_BLKPP(PRED_BLKP(bp)), SUCC_BLKP(bp));
+            if (SUCC_BLKP(bp)) PUT(PRED_BLKPP(SUCC_BLKP(bp)), PRED_BLKP(bp));
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), heap_listp);
+            PUT(PRED_BLKPP(heap_listp), bp);
+            heap_listp = bp;
+        }
+    #endif
     }
 
     /* Case 4 */
     else {
+        bq = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
+    #ifdef EXPT_LIST
+        if (bp == heap_listp) {
+            if (PRED_BLKP(bq)) PUT(SUCC_BLKPP(PRED_BLKP(bq)), SUCC_BLKP(bq));
+            if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), PRED_BLKP(bq));
+        }
+        else if (bq == heap_listp) {
+            if (PRED_BLKP(bp)) PUT(SUCC_BLKPP(PRED_BLKP(bp)), SUCC_BLKP(bp));
+            if (SUCC_BLKP(bp)) PUT(PRED_BLKPP(SUCC_BLKP(bp)), PRED_BLKP(bp));
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), SUCC_BLKP(heap_listp));
+            if (SUCC_BLKP(heap_listp)) PUT(PRED_BLKPP(SUCC_BLKP(heap_listp)), bp);
+            heap_listp = bp;
+        }
+        else {
+            if (PRED_BLKP(bq)) PUT(SUCC_BLKPP(PRED_BLKP(bq)), SUCC_BLKP(bq));
+            if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), PRED_BLKP(bq));
+            if (PRED_BLKP(bp)) PUT(SUCC_BLKPP(PRED_BLKP(bp)), SUCC_BLKP(bp));
+            if (SUCC_BLKP(bp)) PUT(PRED_BLKPP(SUCC_BLKP(bp)), PRED_BLKP(bp));
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), heap_listp);
+            PUT(PRED_BLKPP(heap_listp), bp);
+            heap_listp = bp;
+        }
+    #endif
     }
 
 #ifdef NEXT_FIT
