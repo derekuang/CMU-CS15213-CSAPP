@@ -20,6 +20,8 @@
  *       and boundary tag coalescing.
  *
  * v2.1: Compatible with next-fit placement and best-fit placement.
+ *
+ * v2.2: Freeing with address-ordered policy compatibly.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,10 +62,17 @@ team_t team = {
  */
 #define EXPT_LIST
 /*
+ * If ADDR_ORDERED defined, the free blocks will always address-
+ * ordered(based on explicit free lists).
+ */
+#ifdef EXPT_LIST
+#define ADDR_ORDERED
+#endif
+/*
  * If NEXT_FIT defined, use next fit search, else use first-fit search.
  * If NEXT_FIT not defined and BEST_FIT defined, use best fit search.
  */
-#define NEXT_FITx
+#define NEXT_FIT
 #define BEST_FITx
 
 /* Basic constants and macros */
@@ -419,10 +428,31 @@ static void *coalesce(void *bp)
     /* Case 1 */
     if (palloc && nalloc) {
     #ifdef EXPT_LIST
+
+    #ifdef ADDR_ORDERED
+        /* Address-ordered policy */
+        if (!heap_listp || (bp < heap_listp)) { /* Empty free list || addr(bp) < addr(heap_listp) */
+            PUT(PRED_BLKPP(bp), NULL);
+            PUT(SUCC_BLKPP(bp), heap_listp);
+            if (heap_listp) PUT(PRED_BLKPP(heap_listp), bp);
+            heap_listp = bp;
+        }
+        else {
+            for (bq = heap_listp; SUCC_BLKP(bq) && (SUCC_BLKP(bq) < bp); bq = SUCC_BLKP(bq)) /* Find predecessor free block */
+                ;
+            PUT(PRED_BLKPP(bp), bq);
+            PUT(SUCC_BLKPP(bp), SUCC_BLKP(bq));
+            if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), bp);
+            PUT(SUCC_BLKPP(bq), bp);
+        }
+    #else
+        /* LIFO policy */
         PUT(PRED_BLKPP(bp), NULL);
         PUT(SUCC_BLKPP(bp), heap_listp);
         if (heap_listp) PUT(PRED_BLKPP(heap_listp), bp);
         heap_listp = bp;
+    #endif
+
     #endif
     }
 
@@ -432,11 +462,26 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(bq));
         PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
         PUT(FTRP(bp), PACK(size, BLK_FREE));
+
     #ifdef EXPT_LIST
+
+    #ifdef ADDR_ORDERED
+        /* Address-ordered policy */
+        PUT(PRED_BLKPP(bp), PRED_BLKP(bq));
+        PUT(SUCC_BLKPP(bp), SUCC_BLKP(bq));
+        if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), bp);
+        if (bp < heap_listp) { /* bq == heap_listp */
+            heap_listp = bp;
+        }
+        else {
+            PUT(SUCC_BLKPP(PRED_BLKP(bq)), bp);
+        }
+    #else
+        /* LIFO policy */
         if (bq == heap_listp) { /* The first free block is coalesced */
-            if (SUCC_BLKP(heap_listp)) PUT(PRED_BLKPP(SUCC_BLKP(heap_listp)), bp);
             PUT(PRED_BLKPP(bp), NULL);
-            PUT(SUCC_BLKPP(bp), SUCC_BLKP(heap_listp));
+            PUT(SUCC_BLKPP(bp), SUCC_BLKP(bq));
+            if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), bp);
             heap_listp = bp;
         }
         else {
@@ -448,6 +493,8 @@ static void *coalesce(void *bp)
             heap_listp = bp;
         }
     #endif
+
+    #endif
     }
 
     /* Case 3 */
@@ -456,7 +503,14 @@ static void *coalesce(void *bp)
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
         PUT(FTRP(bp), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
+
     #ifdef EXPT_LIST
+
+    #ifdef ADDR_ORDERED
+        /* Address-ordered policy */
+        ;
+    #else
+        /* LIFO policy */
         if (bp == heap_listp) { /* The first free block is coalesced */
             ;
         }
@@ -469,6 +523,8 @@ static void *coalesce(void *bp)
             heap_listp = bp;
         }
     #endif
+
+    #endif
     }
 
     /* Case 4 */
@@ -479,7 +535,15 @@ static void *coalesce(void *bp)
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, BLK_FREE));
         bp = PREV_BLKP(bp);
+
     #ifdef EXPT_LIST
+
+    #ifdef ADDR_ORDERED
+        /* Address-ordered policy */
+        PUT(SUCC_BLKPP(bp), SUCC_BLKP(bq));
+        if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), bp);
+    #else
+        /* LIFO policy */
         if (bp == heap_listp) {
             if (PRED_BLKP(bq)) PUT(SUCC_BLKPP(PRED_BLKP(bq)), SUCC_BLKP(bq));
             if (SUCC_BLKP(bq)) PUT(PRED_BLKPP(SUCC_BLKP(bq)), PRED_BLKP(bq));
@@ -502,6 +566,8 @@ static void *coalesce(void *bp)
             PUT(PRED_BLKPP(heap_listp), bp);
             heap_listp = bp;
         }
+    #endif
+
     #endif
     }
 
