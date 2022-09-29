@@ -349,7 +349,11 @@ static void place(void *bp, size_t asize)
 
     if ((csize - asize) >= MINBLOCK) {
     #ifdef SEG_LIST
-        unjoin(old_bp); /* The size in the header is precise now(csize), later will change to asize */
+        /*
+         * The size in the header is precise for unjoin now(csize),
+         * later will change to asize.
+         */
+        unjoin(old_bp);
     #endif
         PUT(HDRP(bp), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
         bp = NEXT_BLKP(bp);
