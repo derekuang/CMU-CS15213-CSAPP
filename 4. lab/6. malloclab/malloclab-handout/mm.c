@@ -63,12 +63,15 @@ team_t team = {
 
 /*
  * If EXPT_LIST defined, the allocator based on explicit free lists,
- * if SEG_LIST defined, based on segregated explicit free lists,
  * else based on implicit free lists.
  */
 #define EXPT_LIST
 #ifdef EXPT_LIST
-#define SEG_LIST /* Only use first-fit search */
+/*
+ * If SEG_LIST defined, the allocator based on segregated explicit
+ * free lists.
+ */
+#define SEG_LIST
 #endif
 
 /*
@@ -78,13 +81,13 @@ team_t team = {
  */
 #define ADDR_ORDEREDx
 
-/*
- * If NEXT_FIT defined, use next fit search,
- * else if BEST_FIT defined, use best fit search,
- * else use first-fit search.
- */
+/* Use first-fit search default */
+#ifndef SEG_LIST
+/* If NEXT_FIT defined, use next fit search */
 #define NEXT_FITx
+/* If BEST_FIT defined, use best fit search */
 #define BEST_FITx
+#endif
 
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
@@ -224,13 +227,11 @@ void *mm_malloc(size_t size)
 
     while (heap_listpp <= last_listpp) {
         heap_listp = *heap_listpp;
-        if (!heap_listp) {
-            heap_listpp++; /* Move to next size heap list */
-        }
-        else if ((bp = find_fit(asize)) != NULL) {
+        if (heap_listp && (bp = find_fit(asize))) {
             place(bp, asize);
             return bp;
         }
+        heap_listpp++; /* Move to next size heap list */
     }
 #else
     if ((bp = find_fit(asize)) != NULL) {
@@ -528,6 +529,10 @@ static void *coalesce(void *bp)
 
     /* Case 3 */
     else if (!palloc && nalloc) {
+    #ifdef SEG_LIST
+        unjoin(PREV_BLKP(bp));
+    #endif
+
         bq = bp;
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, (BLK_FREE | BLK_PALLOC)));
@@ -541,6 +546,9 @@ static void *coalesce(void *bp)
         ;
     #else
         /* LIFO policy */
+    #ifdef SEG_LIST
+        join(NULL, bp, heap_listp);
+    #else
         if (bp == heap_listp) { /* The first free block is coalesced */
             ;
         }
@@ -548,6 +556,7 @@ static void *coalesce(void *bp)
             unjoin(bp);
             join(NULL, bp, heap_listp);
         }
+    #endif
 
     #endif
 
@@ -556,6 +565,11 @@ static void *coalesce(void *bp)
 
     /* Case 4 */
     else {
+    #ifdef SEG_LIST
+        unjoin(PREV_BLKP(bp));
+        unjoin(NEXT_BLKP(bp));
+    #endif
+
         bq = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(HDRP(NEXT_BLKP(bp)));
@@ -570,6 +584,9 @@ static void *coalesce(void *bp)
         join(PRED_BLKP(bp), bp, SUCC_BLKP(bq));
     #else
         /* LIFO policy */
+    #ifdef SEG_LIST
+        join(NULL, bp, heap_listp);
+    #else
         if (bp == heap_listp) {
             unjoin(bq);
         }
@@ -578,6 +595,8 @@ static void *coalesce(void *bp)
             unjoin(bp);
             join(NULL, bp, heap_listp);
         }
+    #endif
+
     #endif
 
     #endif
@@ -627,12 +646,13 @@ static void join(void *pred, void *bp, void *succ) {
     #ifdef SEG_LIST
         char **heap_listpp;
         heap_listp = *(heap_listpp = match_heap(GET_SIZE(HDRP(bp))));
+        if (!pred) succ = heap_listp; /* Redirect the heap list */
     #endif
 
     PUT(PRED_BLKPP(bp), pred);
     PUT(SUCC_BLKPP(bp), succ);
     if (succ) PUT(PRED_BLKPP(succ), bp);
-    pred ? PUT(SUCC_BLKPP(pred), bp) : (heap_listp = bp);
+    if (pred) PUT(SUCC_BLKPP(pred), bp); else (heap_listp = bp);
 
     #ifdef SEG_LIST
         *heap_listpp = heap_listp;
