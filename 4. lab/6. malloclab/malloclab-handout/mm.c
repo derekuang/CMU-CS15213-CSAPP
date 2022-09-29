@@ -68,7 +68,7 @@ team_t team = {
  */
 #define EXPT_LIST
 #ifdef EXPT_LIST
-#define SEG_LISTx /* Only use first-fit search */
+#define SEG_LIST /* Only use first-fit search */
 #endif
 
 /*
@@ -144,7 +144,7 @@ static char *rover;           /* Next fit rover */
 #endif
 
 /* Function prototypes for internal helper routines */
-static void *extend_heap(size_t words);
+static void *extend_heap(size_t size);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
@@ -225,13 +225,12 @@ void *mm_malloc(size_t size)
     while (heap_listpp <= last_listpp) {
         heap_listp = *heap_listpp;
         if (!heap_listp) {
-            ;
+            heap_listpp++; /* Move to next size heap list */
         }
         else if ((bp = find_fit(asize)) != NULL) {
             place(bp, asize);
             return bp;
         }
-        heap_listpp++; /* Move to next size heap list */
     }
 #else
     if ((bp = find_fit(asize)) != NULL) {
@@ -242,7 +241,7 @@ void *mm_malloc(size_t size)
 
     /* No fit found. Get more memory and place the block */
     extendsize = MAX(asize, CHUNKSIZE);
-    if ((bp = extend_heap(extendsize)) == NULL)
+    if (!(bp = extend_heap(extendsize)))
         return NULL;
     place(bp, asize);
     return bp;
@@ -316,21 +315,21 @@ void *mm_realloc(void *ptr, size_t size)
 /*
  * extend_heap - Extend heap with free block and return its block pointer.
  */
-static void *extend_heap(size_t bytes)
+static void *extend_heap(size_t size)
 {
     char *bp;
-    size_t size;
+    size_t asize;
     size_t palloc;
 
     /* Allocate an multiple of ALIGNMENT number bytes to maintain alignment */
-    size = ALIGN(bytes);
-    if ((long)(bp = mem_sbrk(size)) == -1)
+    asize = ALIGN(size);
+    if ((long)(bp = mem_sbrk(asize)) == -1)
         return NULL;
 
     /* Initialize free block header/footer and the epilogue header */
     palloc = GET_PALLOC(HDRP(bp));
-    PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
-    PUT(FTRP(bp), PACK(size, BLK_FREE));
+    PUT(HDRP(bp), PACK(asize, (BLK_FREE | palloc)));
+    PUT(FTRP(bp), PACK(asize, BLK_FREE));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, BLK_ALLOC));
 
     /* Coalesce if the previous block was free */
@@ -347,14 +346,10 @@ static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
     char *old_bp = bp;
-#ifdef SEG_LIST
-    char **heap_listpp;
-    heap_listp = *(heap_listpp = match_heap(csize));
-#endif
 
     if ((csize - asize) >= MINBLOCK) {
     #ifdef SEG_LIST
-        unjoin(old_bp);
+        unjoin(old_bp); /* The size in the header is precise now(csize), later will change to asize */
     #endif
         PUT(HDRP(bp), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
         bp = NEXT_BLKP(bp);
@@ -381,12 +376,7 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)), (BLK_ALLOC | BLK_PALLOC)));
 
     #ifdef EXPT_LIST
-
-    #ifdef SEG_LIST
         unjoin(old_bp);
-    #else
-        unjoin(old_bp);
-    #endif
 
     #ifdef NEXT_FIT
         rover = SUCC_BLKP(rover);
@@ -604,6 +594,7 @@ static void *coalesce(void *bp)
 
 /*
  * unjoin - Given a block ptr bp, unjoin it from block list.
+ *          The size info in the header of block should be precise.
  */
 static void unjoin(void *bp) {
     #ifdef SEG_LIST
@@ -626,6 +617,7 @@ static void unjoin(void *bp) {
 /*
  * join - Given a block ptr bp, join it between pred and succ,
  *        if pred is NULL, join it as the first block.
+ *        The size info in the header of block should be precise.
  */
 static void join(void *pred, void *bp, void *succ) {
     #ifdef SEG_LIST
