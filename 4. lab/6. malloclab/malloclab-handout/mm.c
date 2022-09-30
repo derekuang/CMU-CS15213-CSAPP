@@ -28,6 +28,8 @@
  *       and boundary tag coalescing.
  *
  * v3.1: Freeing with address-ordered policy compatibly.
+ *
+ * v3.2: Optimize mm_realloc.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,13 +85,16 @@ team_t team = {
  */
 #define ADDR_ORDERED
 
-/* Use first-fit search default */
+/*
+ * Use first-fit search by default.
+ * Segregated free list cannot use next-fit search.
+ */
 #ifndef SEG_LIST
 /* If NEXT_FIT defined, use next fit search */
 #define NEXT_FITx
+#endif
 /* If BEST_FIT defined, use best fit search */
 #define BEST_FITx
-#endif
 
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
@@ -103,8 +108,11 @@ team_t team = {
 #define BLK_ALLOC   0b01    /* The block is allocated */
 #define BLK_PALLOC  0b10    /* The previous block is allocated(only stored in header) */
 
-/* rounds up to the nearest multiple of ALIGNMENT */
+/* Rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+
+/* Adjust block size to include overhead and alignment reqs */
+#define ADJUST(size) ((size < 3*WSIZE) ? MINBLOCK : ALIGN(size+WSIZE))
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -216,12 +224,7 @@ void *mm_malloc(size_t size)
         return NULL;
 
     /* Adjust block size to include overhead and alignment reqs */
-    if (size <= 3*WSIZE) {
-        asize = MINBLOCK;
-    }
-    else {
-        asize = ALIGN(size+WSIZE);
-    }
+    asize = ADJUST(size);
 
     /* Search the free list for a fit */
 #ifdef SEG_LIST
@@ -279,12 +282,12 @@ void mm_free(void *bp)
 }
 
 /*
- * mm_realloc - Naive implementation of realloc.
+ * mm_realloc - Reallocates the given area of memory.
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    size_t oldsize;
-    void *newptr;
+    size_t oldsize, asize;
+    void *newptr, *bp;
 
     /* If size == 0, free the block and return NULL */
     if (size == 0) {
@@ -297,17 +300,43 @@ void *mm_realloc(void *ptr, size_t size)
         return mm_malloc(size);
     }
 
-    newptr = mm_malloc(size);
-    if (!newptr) {
-        return NULL;
+    /* Adjust block size to include overhead and alignment reqs */
+    asize = ADJUST(size);
+
+    oldsize = GET_SIZE(HDRP(ptr));
+    if (asize <= oldsize) {
+        if ((oldsize - asize) >= MINBLOCK) {
+            /* Split a free block from old allocated area */
+            PUT(HDRP(ptr), PACK(asize, (BLK_ALLOC | GET_PALLOC(HDRP(ptr)))));
+            bp = NEXT_BLKP(ptr);
+            PUT(HDRP(bp), PACK((oldsize-asize), (BLK_FREE | BLK_PALLOC)));
+            PUT(FTRP(bp), PACK((oldsize-asize), BLK_FREE));
+            mm_free(bp);
+        }
+        return ptr;
+    }
+    else {
+        bp = NEXT_BLKP(ptr);
+        if (!GET_ALLOC(HDRP(bp)) && (oldsize+GET_SIZE(HDRP(bp))) >= asize) {
+            /* The next block is free and combine size bigger than asize */
+            place(bp, (asize-oldsize));
+            PUT(HDRP(ptr), PACK((oldsize+GET_SIZE(HDRP(bp))), (BLK_ALLOC | GET_PALLOC(HDRP(ptr)))));
+            return ptr;
+        }
+        else {
+            newptr = mm_malloc(size);
+            if (!newptr) {
+                return NULL;
+            }
+
+            /* Copy the old data */
+            memcpy(newptr, ptr, oldsize);
+
+            /* Free the old block */
+            mm_free(ptr);
+        }
     }
 
-    /* Copy the old data */
-    oldsize = MIN(GET_SIZE(HDRP(ptr)), size);
-    memcpy(newptr, ptr, oldsize);
-
-    /* Free the old block */
-    mm_free(ptr);
 
     return newptr;
 }
