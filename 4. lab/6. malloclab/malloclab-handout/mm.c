@@ -504,6 +504,9 @@ static void *coalesce(void *bp)
 
     /* Case 2 */
     else if (palloc && !nalloc) {
+    #ifdef SEG_LIST
+        unjoin(NEXT_BLKP(bp));
+    #endif
         bq = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(bq));
         PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
