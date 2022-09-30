@@ -30,6 +30,32 @@
  * v3.1: Freeing with address-ordered policy compatibly.
  *
  * v3.2: Optimize mm_realloc.
+ *
+ * v3.3: Fix mm_realloc.
+ *
+ * Performance Index for different strategies:
+ * ===============================================================
+ * Implicit free lists
+ * ===============================================================
+ * EXPT_LISTx ----------------------------- FIRST_FIT -> 55(44+11)
+ *          | ------------------------------ NEXT_FIT -> 83(43+40)
+ *          | ------------------------------ BEST_FIT -> 56(45+11)
+ * ===============================================================
+ * Explicit free lists
+ * ===============================================================
+ * EXPT_LIST - SEG_LISTx - ADDR_ORDEREDx -- FIRST_FIT -> 83(43+40)
+ *         |           |               | --- NEXT_FIT -> 82(42+40)
+ *         |           |               | --- BEST_FIT -> 75(45+30)
+ *         |           |
+ *         |           | -- ADDR_ORDERED -- FIRST_FIT -> 69(44+25)
+ *         |                           | --- NEXT_FIT -> 81(43+38)
+ *         |                           | --- BEST_FIT -> 69(45+24)
+ *         |
+ *         | -- SEG_LIST - ADDR_ORDEREDx -- FIRST_FIT -> 82(42+40)
+ *                     |               | --- BEST_FIT -> 85(45+40)
+ *                     |
+ *                     | -- ADDR_ORDERED -- FIRST_FIT -> 73(44+29)
+ *                                     | --- BEST_FIT -> 73(45+29)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,14 +102,13 @@ team_t team = {
  * free lists.
  */
 #define SEG_LIST
-#endif
-
 /*
  * If ADDR_ORDERED defined, the free blocks insertion use
  * address-ordered policy, else use LIFO(last-in-first-out)
  * policy(based on explicit free lists or segregated free lists).
  */
-#define ADDR_ORDERED
+#define ADDR_ORDEREDx
+#endif
 
 /*
  * Use first-fit search by default.
@@ -94,7 +119,7 @@ team_t team = {
 #define NEXT_FITx
 #endif
 /* If BEST_FIT defined, use best fit search */
-#define BEST_FITx
+#define BEST_FIT
 
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
@@ -164,7 +189,9 @@ static void *coalesce(void *bp);
 #ifdef EXPT_LIST
 static void unjoin(void *bp);
 static void join(void *pred, void *bp, void *succ);
+#ifdef ADDR_ORDERED
 static char *find_pred(void *bp);
+#endif
 #endif
 #ifdef SEG_LIST
 static char **match_heap(size_t asize);
@@ -316,25 +343,16 @@ void *mm_realloc(void *ptr, size_t size)
         return ptr;
     }
     else {
-        bp = NEXT_BLKP(ptr);
-        if (!GET_ALLOC(HDRP(bp)) && (oldsize+GET_SIZE(HDRP(bp))) >= asize) {
-            /* The next block is free and combine size bigger than asize */
-            place(bp, (asize-oldsize));
-            PUT(HDRP(ptr), PACK((oldsize+GET_SIZE(HDRP(bp))), (BLK_ALLOC | GET_PALLOC(HDRP(ptr)))));
-            return ptr;
+        newptr = mm_malloc(size);
+        if (!newptr) {
+            return NULL;
         }
-        else {
-            newptr = mm_malloc(size);
-            if (!newptr) {
-                return NULL;
-            }
 
-            /* Copy the old data */
-            memcpy(newptr, ptr, oldsize);
+        /* Copy the old data */
+        memcpy(newptr, ptr, oldsize);
 
-            /* Free the old block */
-            mm_free(ptr);
-        }
+        /* Free the old block */
+        mm_free(ptr);
     }
 
 
@@ -703,6 +721,7 @@ static void join(void *pred, void *bp, void *succ) {
 #endif
 }
 
+#ifdef ADDR_ORDERED
 /*
  * find_pred - Given a block pointer bp, find its predcessor address-ordered.
  */
@@ -722,6 +741,7 @@ static char *find_pred(void *bp) {
     }
     return bq;
 }
+#endif
 
 #endif
 
