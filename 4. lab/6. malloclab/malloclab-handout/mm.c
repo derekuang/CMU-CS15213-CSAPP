@@ -26,6 +26,8 @@
  * v3.0: In this approach, the allocator based on segregated free lists,
  *       first-fit placement, freeing with LIFO(last-in-first-out) policy,
  *       and boundary tag coalescing.
+ *
+ * v3.1: Freeing with address-ordered policy compatibly.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,7 +81,7 @@ team_t team = {
  * address-ordered policy, else use LIFO(last-in-first-out)
  * policy(based on explicit free lists or segregated free lists).
  */
-#define ADDR_ORDEREDx
+#define ADDR_ORDERED
 
 /* Use first-fit search default */
 #ifndef SEG_LIST
@@ -154,6 +156,7 @@ static void *coalesce(void *bp);
 #ifdef EXPT_LIST
 static void unjoin(void *bp);
 static void join(void *pred, void *bp, void *succ);
+static char *find_pred(void *bp);
 #endif
 #ifdef SEG_LIST
 static char **match_heap(size_t asize);
@@ -489,15 +492,8 @@ static void *coalesce(void *bp)
 
     #ifdef ADDR_ORDERED
         /* Address-ordered policy */
-        if (!heap_listp || (bp < heap_listp)) { /* Empty free list || addr(bp) < addr(heap_listp) */
-            join(NULL, bp, heap_listp);
-        }
-        else {
-            for (bq = heap_listp; SUCC_BLKP(bq) && (SUCC_BLKP(bq) < bp); bq = SUCC_BLKP(bq))
-                /* Find predecessor free block bq */
-                ;
-            join(bq, bp, SUCC_BLKP(bq));
-        }
+        bq = find_pred(bp);
+        bq ? join(bq, bp, SUCC_BLKP(bq)) : join(NULL, bp, heap_listp);
     #else
         /* LIFO policy */
         join(NULL, bp, heap_listp);
@@ -508,6 +504,9 @@ static void *coalesce(void *bp)
 
     /* Case 2 */
     else if (palloc && !nalloc) {
+    #ifdef SEG_LIST
+        unjoin(NEXT_BLKP(bp));
+    #endif
         bq = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(bq));
         PUT(HDRP(bp), PACK(size, (BLK_FREE | palloc)));
@@ -517,7 +516,13 @@ static void *coalesce(void *bp)
 
     #ifdef ADDR_ORDERED
         /* Address-ordered policy */
+    #ifdef SEG_LIST
+        bq = find_pred(bp);
+        bq ? join(bq, bp, SUCC_BLKP(bq)) : join(NULL, bp, heap_listp);
+    #else
         join(PRED_BLKP(bq), bp, SUCC_BLKP(bq));
+    #endif
+
     #else
         /* LIFO policy */
         unjoin(bq);
@@ -543,7 +548,12 @@ static void *coalesce(void *bp)
 
     #ifdef ADDR_ORDERED
         /* Address-ordered policy */
-        ;
+    #ifdef SEG_LIST
+        bq = find_pred(bp);
+        bq ? join(bq, bp, SUCC_BLKP(bq)) : join(NULL, bp, heap_listp);
+    #else
+        ; /* Don't need to do sth else in this case */
+    #endif
     #else
         /* LIFO policy */
     #ifdef SEG_LIST
@@ -581,7 +591,12 @@ static void *coalesce(void *bp)
 
     #ifdef ADDR_ORDERED
         /* Address-ordered policy */
+    #ifdef SEG_LIST
+        bq = find_pred(bp);
+        bq ? join(bq, bp, SUCC_BLKP(bq)) : join(NULL, bp, heap_listp);
+    #else
         join(PRED_BLKP(bp), bp, SUCC_BLKP(bq));
+    #endif
     #else
         /* LIFO policy */
     #ifdef SEG_LIST
@@ -620,10 +635,10 @@ static void *coalesce(void *bp)
  *          The size info in the header of block should be precise.
  */
 static void unjoin(void *bp) {
-    #ifdef SEG_LIST
-        char **heap_listpp;
-        heap_listp = *(heap_listpp = match_heap(GET_SIZE(HDRP(bp))));
-    #endif
+#ifdef SEG_LIST
+    char **heap_listpp;
+    heap_listp = *(heap_listpp = match_heap(GET_SIZE(HDRP(bp))));
+#endif
 
     if (SUCC_BLKP(bp)) PUT(PRED_BLKPP(SUCC_BLKP(bp)), PRED_BLKP(bp));
     if (PRED_BLKP(bp)) PUT(SUCC_BLKPP(PRED_BLKP(bp)), SUCC_BLKP(bp));
@@ -632,9 +647,9 @@ static void unjoin(void *bp) {
         heap_listp = SUCC_BLKP(bp);
     }
 
-    #ifdef SEG_LIST
-        *heap_listpp = heap_listp;
-    #endif
+#ifdef SEG_LIST
+    *heap_listpp = heap_listp;
+#endif
 }
 
 /*
@@ -643,20 +658,40 @@ static void unjoin(void *bp) {
  *        The size info in the header of block should be precise.
  */
 static void join(void *pred, void *bp, void *succ) {
-    #ifdef SEG_LIST
-        char **heap_listpp;
-        heap_listp = *(heap_listpp = match_heap(GET_SIZE(HDRP(bp))));
-        if (!pred) succ = heap_listp; /* Redirect the heap list */
-    #endif
+#ifdef SEG_LIST
+    char **heap_listpp;
+    heap_listp = *(heap_listpp = match_heap(GET_SIZE(HDRP(bp))));
+    if (!pred) succ = heap_listp; /* Redirect the heap list */
+#endif
 
     PUT(PRED_BLKPP(bp), pred);
     PUT(SUCC_BLKPP(bp), succ);
     if (succ) PUT(PRED_BLKPP(succ), bp);
     if (pred) PUT(SUCC_BLKPP(pred), bp); else (heap_listp = bp);
 
-    #ifdef SEG_LIST
-        *heap_listpp = heap_listp;
-    #endif
+#ifdef SEG_LIST
+    *heap_listpp = heap_listp;
+#endif
+}
+
+/*
+ * find_pred - Given a block pointer bp, find its predcessor address-ordered.
+ */
+static char *find_pred(void *bp) {
+#ifdef SEG_LIST
+    heap_listp = *(match_heap(GET_SIZE(HDRP(bp))));
+#endif
+
+    char *bq = heap_listp;
+
+    if (!heap_listp || (bp < heap_listp)) { /* Empty free list or addr(bp) < addr(heap_listp) */
+        return NULL;
+    }
+
+    while (SUCC_BLKP(bq) && (SUCC_BLKP(bq) < bp)) {
+        bq = SUCC_BLKP(bq);
+    }
+    return bq;
 }
 
 #endif
