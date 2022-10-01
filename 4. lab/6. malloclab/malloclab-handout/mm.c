@@ -37,25 +37,25 @@
  * ===============================================================
  * Implicit free lists
  * ===============================================================
- * EXPT_LISTx ----------------------------- FIRST_FIT -> 55(44+11)
+ * EXPT_LISTx ----------------------------- FIRST_FIT -> 57(46+11)
  *          | ------------------------------ NEXT_FIT -> 83(43+40)
  *          | ------------------------------ BEST_FIT -> 56(45+11)
  * ===============================================================
  * Explicit free lists
  * ===============================================================
- * EXPT_LIST - SEG_LISTx - ADDR_ORDEREDx -- FIRST_FIT -> 83(43+40)
- *         |           |               | --- NEXT_FIT -> 82(42+40)
+ * EXPT_LIST - SEG_LISTx - ADDR_ORDEREDx -- FIRST_FIT -> 84(44+40)
+ *         |           |   (LIFO)      | --- NEXT_FIT -> 83(43+40)
  *         |           |               | --- BEST_FIT -> 75(45+30)
  *         |           |
- *         |           | -- ADDR_ORDERED -- FIRST_FIT -> 69(44+25)
- *         |                           | --- NEXT_FIT -> 81(43+38)
+ *         |           | -- ADDR_ORDERED -- FIRST_FIT -> 71(46+25)
+ *         |                           | --- NEXT_FIT -> 81(44+37)
  *         |                           | --- BEST_FIT -> 69(45+24)
  *         |
- *         | -- SEG_LIST - ADDR_ORDEREDx -- FIRST_FIT -> 82(42+40)
- *                     |               | --- BEST_FIT -> 85(45+40)
+ *         | -- SEG_LIST - ADDR_ORDEREDx -- FIRST_FIT -> 84(44+40)
+ *                     |   (LIFO)      | --- BEST_FIT -> 85(45+40)
  *                     |
- *                     | -- ADDR_ORDERED -- FIRST_FIT -> 73(44+29)
- *                                     | --- BEST_FIT -> 73(45+29)
+ *                     | -- ADDR_ORDERED -- FIRST_FIT -> 75(46+29)
+ *                                     | --- BEST_FIT -> 74(45+29)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -313,7 +313,7 @@ void mm_free(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    size_t oldsize, asize;
+    size_t oldsize, newsize, asize;
     void *newptr, *bp;
 
     /* If size == 0, free the block and return NULL */
@@ -342,6 +342,34 @@ void *mm_realloc(void *ptr, size_t size)
         }
         return ptr;
     }
+    else if (!GET_PALLOC(HDRP(ptr)) &&
+                GET_SIZE(HDRP(PREV_BLKP(ptr))) <= asize &&
+                (oldsize+GET_SIZE(HDRP(PREV_BLKP(ptr))) >= asize)) {
+        newptr = PREV_BLKP(ptr);
+        newsize = oldsize+GET_SIZE(HDRP(newptr));
+    #ifdef EXPT_LIST
+        unjoin(newptr);
+
+    #ifdef NEXT_FIT
+        rover = (rover == newptr) ? SUCC_BLKP(rover) : rover;
+    #endif
+
+    #endif
+        if ((newsize-asize) >= MINBLOCK) {
+            /* Because of memory overlap, cannot use memcpy here. */
+            memmove(newptr, ptr, oldsize);
+            PUT(HDRP(newptr), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
+            bp = NEXT_BLKP(newptr);
+            PUT(HDRP(bp), PACK((newsize-asize), BLK_PALLOC));
+            mm_free(bp);
+        }
+        else {
+            /* Because of memory overlap, cannot use memcpy here. */
+            memmove(newptr, ptr, oldsize);
+            PUT(HDRP(newptr), PACK(newsize, (BLK_ALLOC | BLK_PALLOC)));
+        }
+        return newptr;
+    }
     else {
         newptr = mm_malloc(size);
         if (!newptr) {
@@ -353,10 +381,11 @@ void *mm_realloc(void *ptr, size_t size)
 
         /* Free the old block */
         mm_free(ptr);
+
+        return newptr;
     }
 
-
-    return newptr;
+    return NULL;
 }
 
 /*
