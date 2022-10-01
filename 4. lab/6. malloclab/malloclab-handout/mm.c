@@ -121,6 +121,9 @@ team_t team = {
 /* If BEST_FIT defined, use best fit search */
 #define BEST_FIT
 
+/* If CHECKMOD defined, invoke mm_check() after some routines */
+#define CHECKMODx
+
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
@@ -137,7 +140,7 @@ team_t team = {
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
 /* Adjust block size to include overhead and alignment reqs */
-#define ADJUST(size) ((size < 3*WSIZE) ? MINBLOCK : ALIGN(size+WSIZE))
+#define ADJUST(size) ((size <= 3*WSIZE) ? MINBLOCK : ALIGN(size+WSIZE))
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -196,6 +199,7 @@ static char *find_pred(void *bp);
 #ifdef SEG_LIST
 static char **match_heap(size_t asize);
 #endif
+static int mm_check(void);
 
 /*
  * mm_init - Initialize the memory manager.
@@ -234,6 +238,10 @@ int mm_init(void)
     rover = heap_listp;
 #endif
 
+#ifdef CHECKMOD
+    mm_check();
+#endif
+
     return 0;
 }
 
@@ -242,6 +250,10 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
+#ifdef CHECKMOD
+    mm_check();
+#endif
+
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     char *bp;
@@ -286,6 +298,10 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *bp)
 {
+#ifdef CHECKMOD
+    mm_check();
+#endif
+
     if (!bp) {
         return;
     }
@@ -313,6 +329,10 @@ void mm_free(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+#ifdef CHECKMOD
+    mm_check();
+#endif
+
     size_t oldsize, newsize, asize;
     void *newptr, *bp;
 
@@ -331,6 +351,10 @@ void *mm_realloc(void *ptr, size_t size)
     asize = ADJUST(size);
 
     oldsize = GET_SIZE(HDRP(ptr));
+    bp = NEXT_BLKP(ptr);
+    /*
+     * Case 1: asize < oldsize, reuse current block and free remaining space.
+     */
     if (asize <= oldsize) {
         if ((oldsize - asize) >= MINBLOCK) {
             /* Split a free block from old allocated area */
@@ -342,21 +366,46 @@ void *mm_realloc(void *ptr, size_t size)
         }
         return ptr;
     }
+
+    /*
+     * Case 2: oldsize + size(next) >= asize, use next free block and
+               current block for realloc.
+     */
+    /* else if (!GET_ALLOC(HDRP(bp)) && (oldsize+GET_SIZE(HDRP(bp)) >= asize)) {
+        newsize = oldsize+GET_SIZE(HDRP(bp));
+        newptr = ptr;
+    #ifdef EXPT_LIST
+    #ifdef NEXT_FIT
+        rover = (rover==bp) ? SUCC_BLKP(rover) : rover;
+    #endif
+        unjoin(bp);
+    #endif
+        if ((newsize-asize) >= MINBLOCK) {
+            ;
+        }
+        else {
+            PUT(HDRP(newptr), PACK(newsize, (BLK_ALLOC | GET_PALLOC(HDRP(newptr)))));
+            return newptr;
+        }
+    } */
+
+    /*
+     * Case 3: size(prev) + oldsize >= asize, use previous free block and
+     *         current block for realloc.
+     */
     else if (!GET_PALLOC(HDRP(ptr)) &&
-                GET_SIZE(HDRP(PREV_BLKP(ptr))) <= asize &&
-                (oldsize+GET_SIZE(HDRP(PREV_BLKP(ptr))) >= asize)) {
+    GET_SIZE(HDRP(PREV_BLKP(ptr))) <= asize &&
+    (oldsize+GET_SIZE(HDRP(PREV_BLKP(ptr))) >= asize)) {
         newptr = PREV_BLKP(ptr);
         newsize = oldsize+GET_SIZE(HDRP(newptr));
     #ifdef EXPT_LIST
-        unjoin(newptr);
-
     #ifdef NEXT_FIT
-        rover = (rover == newptr) ? SUCC_BLKP(rover) : rover;
+        rover = (rover==newptr) ? SUCC_BLKP(rover) : rover;
     #endif
-
+        unjoin(newptr);
     #endif
+        /* Because of memory overlap, cannot use memcpy here. */
         if ((newsize-asize) >= MINBLOCK) {
-            /* Because of memory overlap, cannot use memcpy here. */
             memmove(newptr, ptr, oldsize);
             PUT(HDRP(newptr), PACK(asize, (BLK_ALLOC | BLK_PALLOC)));
             bp = NEXT_BLKP(newptr);
@@ -364,28 +413,27 @@ void *mm_realloc(void *ptr, size_t size)
             mm_free(bp);
         }
         else {
-            /* Because of memory overlap, cannot use memcpy here. */
             memmove(newptr, ptr, oldsize);
             PUT(HDRP(newptr), PACK(newsize, (BLK_ALLOC | BLK_PALLOC)));
         }
         return newptr;
     }
-    else {
-        newptr = mm_malloc(size);
-        if (!newptr) {
-            return NULL;
-        }
 
-        /* Copy the old data */
-        memcpy(newptr, ptr, oldsize);
-
-        /* Free the old block */
-        mm_free(ptr);
-
-        return newptr;
+    /*
+     * Other case: Realloc in native way.
+     */
+    newptr = mm_malloc(size);
+    if (!newptr) {
+        return NULL;
     }
 
-    return NULL;
+    /* Copy the old data */
+    memcpy(newptr, ptr, oldsize);
+
+    /* Free the old block */
+    mm_free(ptr);
+
+    return newptr;
 }
 
 /*
@@ -399,7 +447,6 @@ static void *extend_heap(size_t size)
 {
     char *bp;
     size_t asize;
-    size_t palloc;
 
     /* Allocate an multiple of ALIGNMENT number bytes to maintain alignment */
     asize = ALIGN(size);
@@ -407,8 +454,7 @@ static void *extend_heap(size_t size)
         return NULL;
 
     /* Initialize free block header/footer and the epilogue header */
-    palloc = GET_PALLOC(HDRP(bp));
-    PUT(HDRP(bp), PACK(asize, (BLK_FREE | palloc)));
+    PUT(HDRP(bp), PACK(asize, (BLK_FREE | GET_PALLOC(HDRP(bp)))));
     PUT(FTRP(bp), PACK(asize, BLK_FREE));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, BLK_ALLOC));
 
@@ -455,18 +501,15 @@ static void place(void *bp, size_t asize)
     #endif
     }
     else {
-        PUT(HDRP(bp), PACK(csize, (BLK_ALLOC | BLK_PALLOC)));
-        bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)), (BLK_ALLOC | BLK_PALLOC)));
-
     #ifdef EXPT_LIST
-        unjoin(old_bp);
-
     #ifdef NEXT_FIT
         rover = SUCC_BLKP(rover);
     #endif
-
+        unjoin(old_bp);
     #endif
+        PUT(HDRP(bp), PACK(csize, (BLK_ALLOC | BLK_PALLOC)));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)), (BLK_ALLOC | BLK_PALLOC)));
     }
 }
 
@@ -694,7 +737,7 @@ static void *coalesce(void *bp)
     }
 
 #ifdef NEXT_FIT
-    /* Make sure the rove isn't pointing into the free block */
+    /* Make sure the rover isn't pointing into the free block */
     /* that we just coalesced */
     if ((rover > (char *)bp) && (rover < NEXT_BLKP(bp))) {
         rover = bp;
@@ -800,3 +843,54 @@ static char **match_heap(size_t asize) {
 }
 
 #endif
+
+/*
+ * mm_check - Scan the heap and checks it for consistency.
+ */
+int mm_check(void) {
+    void *bp, *lastp;
+
+    bp = mem_heap_lo();
+
+    /*
+     * Check the first 3 constant word.
+     */
+    if (GET(bp) != 0 ||
+    GET(bp+WSIZE) != PACK(DSIZE, BLK_ALLOC) ||
+    GET(bp+2*WSIZE) != PACK(DSIZE, BLK_ALLOC)) {
+        printf("Error: Prologue mismatch (%x %x %x)\n", GET(bp), GET(bp+WSIZE), GET(bp+2*WSIZE));
+        exit(0);
+    }
+
+    bp += 4*WSIZE;      /* Point to first payload area */
+    lastp = HDRP(bp)-1; /* Point to the last byte of checked area */
+
+    while(GET_SIZE(HDRP(bp)) > 0) {
+        /* Check if exists contiguous free blocks */
+        if (!GET_ALLOC(HDRP(bp)) && !GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
+            printf("Error: Exists contiguous free blocks (%p, %p)\n", bp, NEXT_BLKP(bp));
+            exit(0);
+        }
+
+        /* Check if the blocks overlap or exists any gap */
+        if (HDRP(bp) > (lastp+1)) {
+            printf("Error: Exists gap between %p and %p\n", lastp, bp);
+            exit(0);
+        }
+        else if (HDRP(bp) < (lastp+1)) {
+            printf("Error: Block overlap on %p and %p\n", bp, lastp);
+            exit(0);
+        }
+
+        bp = NEXT_BLKP(bp);
+        lastp = HDRP(bp)-1;
+    }
+
+    /* Check the top of the heap is match */
+    if ((bp-1) != mem_heap_hi()) {
+        printf("Error: Mismatch on the top of the heap (%p:%p)\n", bp-1, mem_heap_hi());
+        exit(0);
+    }
+
+    return 1;
+}
