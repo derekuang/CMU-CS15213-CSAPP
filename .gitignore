@@ -1,21 +1,2 @@
 code-all
-0. overview/深入理解计算机系统 (Randal E. Bryant, David R. O’Hallaron) (z-lib.org).pdf
-*.exe
-.vscode
-tempCodeRunnerFile.c
-csim
-.csim_results
-4. lab/4. cachelab/cachelab-handout/.marker
-4. lab/4. cachelab/cachelab-handout/derekuang-handin.tar
-4. lab/4. cachelab/cachelab-handout/test-trans
-4. lab/4. cachelab/cachelab-handout/trace.f0
-4. lab/4. cachelab/cachelab-handout/trace.tmp
-4. lab/4. cachelab/cachelab-handout/tracegen
-4. lab/4. cachelab/cachelab-handout/trans.o
-test
-4. lab/5. shlab/shlab-handout/tsh
-4. lab/5. shlab/shlab-handout/mystop
-4. lab/5. shlab/shlab-handout/mysplit
-4. lab/5. shlab/shlab-handout/myspin
-4. lab/5. shlab/shlab-handout/myint
 *.o
