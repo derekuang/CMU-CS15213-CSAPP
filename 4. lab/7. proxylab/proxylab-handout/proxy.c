@@ -15,6 +15,7 @@
 
 #define IS_PREFIX(Pre, Str) (strncmp((Pre), (Str), strlen(Pre)) == 0)
 
+void *thread(void *vargp);
 void doit(int fd);
 void parse_url(char *url, char *hostname, char *port, char *uri);
 void read_requesthdrs(int fd, rio_t *rp, char *host);
@@ -22,11 +23,12 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
 
 int main(int argc, char **argv)
 {
-    int listenfd, connfd;
+    int listenfd, *connfdp;
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
     sigset_t mask;
+    pthread_t tid;
 
     /* Check command line args */
     if (argc != 2) {
@@ -37,18 +39,33 @@ int main(int argc, char **argv)
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(clientaddr);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        Getnameinfo((SA *) &clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
+        connfdp = Malloc(sizeof(int));
+        *connfdp = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
         printf("Accepted connection from (%s, %s)\n", hostname, port);
 
         /* Block signal SIGPIPE */
-        sigemptyset(&mask);
-        sigaddset(&mask, SIGPIPE);
+        Sigemptyset(&mask);
+        Sigaddset(&mask, SIGPIPE);
         Sigprocmask(SIG_BLOCK, &mask, NULL);
 
-        doit(connfd);
-        Close(connfd);
+        Pthread_create(&tid, NULL, thread, connfdp);
     }
+}
+
+/*
+ * thread - a thread routine
+ */
+void *thread(void *vargp)
+{
+    int connfd = *((int *)vargp);
+
+    Pthread_detach(Pthread_self());
+    Free(vargp);
+    doit(connfd);
+    Close(connfd);
+
+    return NULL;
 }
 
 /*
@@ -79,9 +96,12 @@ void doit(int connfd)
 
     /* Connect to the end server and forward request line */
     parse_url(url, host, port, uri);
-    // if (strcmp(host, "csapp.cs.cmu.edu")) return; /* Only accept csapp.cs.cmu.edu for test */
-    clientfd = Open_clientfd(host, port);
+    if ((clientfd = Open_clientfd(host, port)) < 0) {
+        return;
+    }
     printf("Proxy connect to (%s, %s)\n", host, port);
+
+    /* Forward Request line */
     sprintf(buf, "%s %s %s\r\n", method, uri, version);
     printf("%s", buf);
     Rio_writen(clientfd, buf, strlen(buf));
