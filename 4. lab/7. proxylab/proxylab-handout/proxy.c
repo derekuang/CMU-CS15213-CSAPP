@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "csapp.h"
+#include "cache.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -21,6 +22,8 @@ void parse_url(char *url, char *hostname, char *port, char *uri);
 void read_requesthdrs(int fd, rio_t *rp, char *host);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
+static cache_t cache; /* Pointer to the object list of proxy cache */
+
 int main(int argc, char **argv)
 {
     int listenfd, *connfdp;
@@ -35,6 +38,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
+
+    init_cache(&cache);
 
     listenfd = Open_listenfd(argv[1]);
     while (1) {
@@ -77,6 +82,7 @@ void doit(int connfd)
     char buf[MAXLINE], method[MAX_METHOD], url[MAX_URL], version[MAX_VER];
     char host[MAX_HOST], port[MAX_PORT], uri[MAX_URI];
     rio_t rio;
+    object_t *obj;
     ssize_t rc;
 
     /* Read request line */
@@ -84,7 +90,7 @@ void doit(int connfd)
     if (Rio_readlineb(&rio, buf, MAXLINE) <= 0) {
         return;
     }
-    printf("%s", buf);
+    printf("%s\n", buf);
     sscanf(buf, "%s %s %s", method, url, version);
 
     /* Validate the request method */
@@ -94,8 +100,19 @@ void doit(int connfd)
         return;
     }
 
-    /* Connect to the end server and forward request line */
+    /* Parse url and try to fetch object from cache */
     parse_url(url, host, port, uri);
+    if ((obj = fetch_object(&cache, host, port, uri))) {
+        Rio_writen(connfd, obj->obj_buf, obj->size);
+        return;
+    }
+    else {
+        obj = Malloc(sizeof(object_t));
+        init_object(obj);
+        sprintf(obj->url, "%s:%s%s", host, port, uri);
+    }
+
+    /* Connect to the end server */
     if ((clientfd = Open_clientfd(host, port)) < 0) {
         return;
     }
@@ -115,6 +132,7 @@ void doit(int connfd)
         if (Rio_readlineb(&rio, buf, MAXLINE) <= 0) {
             return;
         }
+        receive_object(obj, buf, strlen(buf));
         Rio_writen(connfd, buf, strlen(buf));
     } while (strcmp(buf, "\r\n"));
 
@@ -123,8 +141,12 @@ void doit(int connfd)
         if (rc < 0) {
             return;
         }
+        receive_object(obj, buf, rc);
         Rio_writen(connfd, buf, rc);
     }
+
+    /* Save object to cache */
+    insert_object(&cache, obj);
 
     Close(clientfd);
 }
@@ -149,12 +171,12 @@ void parse_url(char *url, char *host, char *port, char *uri)
     }
 
     if ((q = strchr(p, ':'))) {
-        /* Specify a port */
+        /* Declare a port */
         strncpy(host, p, q-p);
         p = q+1;
 
         if ((q = strchr(p, '/'))) {
-            /* Specify URI */
+            /* Declare URI */
             strncpy(port, p, q-p);
             p = q;
             strcpy(uri, p);
@@ -166,7 +188,7 @@ void parse_url(char *url, char *host, char *port, char *uri)
         }
     }
     else if ((q = strchr(p, '/'))) {
-        /* Specify URI, use default port number */
+        /* Declare URI, use default port number */
         strncpy(host, p, q-p);
         p = q;
 
